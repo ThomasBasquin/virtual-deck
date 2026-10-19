@@ -59,10 +59,10 @@ profiles["casque"] := {
 
 profiles["enceintes"] := {
     label     : "Enceintes",
-    default   : -10.0,
+    default   : -15.0,
     cur       :   0.0,
     min       : -30.0,
-    max       :  -5.0,   ; = -(boost max de l'EQ enceintes : +5 dB)
+    max       :  -8.0,   ; échelle commune avec le casque (gain des amplis calé pour)
     step      :   0.5,
     warnZone  :   1.5
 }

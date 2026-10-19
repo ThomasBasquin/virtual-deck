@@ -79,13 +79,13 @@ La première version (AutoHotkey) était détectée par Easy Anti-Cheat (The Fin
 ## Son : fonctionnement
 
 - **Le switch de profil écrit directement `peace.txt`** (lu par Equalizer APO via `Include: peace.txt` dans `config.txt`) au lieu d'envoyer `Ctrl+Alt+F1/F2` à Peace. Le contenu vient de modèles capturés depuis Peace dans `templates/` : seules les lignes `Device:` (GUID actuel) et `Preamp:` sont réécrites. La sortie audio Windows par défaut suit le profil.
-- **Plafond par profil** : Casque -8 dB, Enceintes -5 dB. Chaque plafond vaut l'opposé du plus gros boost de l'EQ du profil (+8 / +5 dB), pour que le signal ne sature jamais. L'OSD prévient à l'approche du plafond.
+- **Même échelle pour les deux profils** : défaut -15 dB, plancher -30 dB, plafond -8 dB. Le gain des amplis est calé pour qu'une même valeur donne le même niveau perçu au casque et aux enceintes. Le plafond vaut l'opposé du plus gros boost des deux EQ (casque +8 dB, enceintes +5 dB), pour que le signal ne sature jamais. L'OSD prévient à l'approche du plafond.
 - **Peace reste cohérent avec le profil appliqué** : à son ouverture, Peace recharge `Last Configuration.peace` (et non le profil sélectionné) puis réécrit `peace.txt` avec. Le switch recopie donc aussi le profil dans `Last Configuration.peace` (après correction de son GUID) et met à jour `Selected Configuration=` dans `peace.ini`, sinon ouvrir Peace annulerait le switch. Limite : changer de profil *pendant* que Peace est ouvert ne met pas son interface à jour, et il réenregistrera son ancien état en se fermant.
 - **Les modèles se mettent à jour seuls** : si l'EQ est modifié dans Peace, la sync périodique (5 s) recopie le nouveau `peace.txt` dans le modèle du profil concerné.
 - **GUID du DAC USB corrigé automatiquement** quand il change d'identité, avec nouvelle tentative (~1.2 s) si le périphérique n'est pas encore actif.
 - **Peace est fermé au démarrage** : il réserve lui aussi `Ctrl+Alt+F1/F2`, ce qui empêcherait le script de les obtenir. Il n'est pas nécessaire au son (c'est Equalizer APO qui applique `peace.txt`). Désactivable via `$ClosePeace` en haut du script.
 
-Les profils sont définis dans `$S.Profiles`, en haut de `virtual_deck.ps1` :
+Les réglages de volume sont communs (`$Volume`) et les profils définis dans `$S.Profiles`, en haut de `virtual_deck.ps1` :
 
 | Paramètre | Description |
 |-----------|-------------|
