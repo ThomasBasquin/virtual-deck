@@ -43,6 +43,15 @@ $MicOsd = $true
 $mutex = New-Object System.Threading.Mutex($false, 'Local\VirtualDeck')
 if (-not $mutex.WaitOne(0)) { exit }
 
+# Durée de chaque étape du démarrage, écrite dans le journal une fois prêt
+$BootSw = [Diagnostics.Stopwatch]::StartNew()
+$BootSteps = New-Object System.Collections.Generic.List[string]
+$BootSteps.Add("PowerShell $([int]((Get-Date) - (Get-Process -Id $PID).StartTime).TotalMilliseconds) ms")
+function Mark-Boot([string]$step) {
+    $BootSteps.Add("$step $($BootSw.ElapsedMilliseconds) ms")
+    $BootSw.Restart()
+}
+
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
@@ -452,6 +461,8 @@ namespace VirtualDeck {
     }
 }
 '@
+
+Mark-Boot 'types'
 
 [VirtualDeck.Native]::EnableDpiAwareness()
 [System.Windows.Forms.Application]::EnableVisualStyles()
@@ -1076,6 +1087,8 @@ function On-Hotkey([int]$id) {
 # ============================================================
 #  DÉMARRAGE
 # ============================================================
+Mark-Boot 'interface'
+
 if ($ClosePeace) {
     $peace = Get-Process -Name Peace -ErrorAction SilentlyContinue
     if ($peace) {
@@ -1089,6 +1102,7 @@ if ($ClosePeace) {
         }
     }
 }
+Mark-Boot 'Peace'
 
 $S.Hk = New-Object VirtualDeck.HotkeyWindow
 $S.Hk.add_Pressed({ param($id) Safe { On-Hotkey $id } })
@@ -1121,6 +1135,7 @@ foreach ($h in $hotkeys | Where-Object { $_.Id -le 3 }) {
         if ($err) { Log "Variante de $($h.Name) (mod 0x$('{0:X}' -f $mod)) non réservée (err $err)" }
     }
 }
+Mark-Boot 'raccourcis'
 
 # Profil actif = celui qui est réellement dans peace.txt
 $lines = Read-PeaceLines
@@ -1144,11 +1159,14 @@ $syncTimer.Start()
 # périodique) ; Start depuis ce thread, celui de l'interface
 $micWatcher.add_Changed({ Safe { Poll-Mic } })
 $micWatcher.Start()
+Mark-Boot 'son + micro'
 
 # Deck à l'écran (touche ²)
 . (Join-Path $PSScriptRoot 'deck.ps1')
+Mark-Boot 'deck'
 
 Log "Démarrage script — profil actif détecté : $((GetProfile).Label) ($(Fmt (GetProfile).Cur) dB)"
+Log "Démarrage : $($BootSteps -join ', ')"
 if ($failed.Count) {
     Show-Osd '⚠ Raccourcis indisponibles' ($failed -join ', ') 5000 '801010'
 } else {

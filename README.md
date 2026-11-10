@@ -112,6 +112,8 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
 
    `conhost --headless` évite le flash d'une fenêtre console. Une seule instance peut tourner à la fois (mutex).
 
+   Mettre `<Priority>4</Priority>` dans les `<Settings>` de la tâche (export XML puis `schtasks /Create /XML … /F`, en admin) : par défaut le Planificateur lance en priorité 7, en dessous de la normale, et le script mettait ~8 s à démarrer à l'ouverture de session, quand tout se charge en même temps. Le journal note la durée de chaque étape du démarrage (ligne « Démarrage : … »).
+
 5. Après une modification des scripts, relancer : `schtasks /End` ne suffit pas (le `powershell.exe` du script survit, et la nouvelle instance se ferme aussitôt à cause du mutex). Il faut l'arrêter en administrateur puis relancer la tâche (une demande UAC s'affiche) :
 
    ```powershell

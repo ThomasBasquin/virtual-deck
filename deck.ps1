@@ -888,6 +888,7 @@ namespace VirtualDeck {
     }
 }
 '@
+Mark-Boot 'types deck'
 
 # ============================================================
 #  TUILES
