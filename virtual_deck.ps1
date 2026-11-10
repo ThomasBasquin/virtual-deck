@@ -1013,6 +1013,8 @@ function Poll-Mic {
             if ($prev -gt 0 -and $m.State -gt 0) {
                 Log "Micro : état corrigé par la vérification"
                 Show-MicOsd
+            } elseif ($m.State -gt 0) {
+                Log "Micro : $(if ($m.State -eq [VirtualDeck.MicWatcher]::Muted) { 'coupé' } else { 'actif' })"
             }
         }
     }
@@ -1148,6 +1150,14 @@ if ((GetProfile).Cur -le -59.95) {
     (GetProfile).Cur = (GetProfile).Default
     Write-Preamp (GetProfile).Cur
     Log "Démarrage : éteint en mute, volume remis par défaut ($(Fmt (GetProfile).Cur) dB)"
+}
+
+# Ouverture de session (Explorer lancé il y a peu) : on repart sur les
+# enceintes. Une relance du script en cours de session garde le profil actif
+$shell = Get-Process explorer -ErrorAction SilentlyContinue | Sort-Object StartTime | Select-Object -First 1
+if ($S.Active -ne 'enceintes' -and $shell -and ((Get-Date) - $shell.StartTime).TotalMinutes -lt 3) {
+    Log "Ouverture de session : $((GetProfile).Label) → Enceintes"
+    Switch-Profile 'enceintes' -Quiet
 }
 
 $syncTimer = New-Object System.Windows.Forms.Timer
