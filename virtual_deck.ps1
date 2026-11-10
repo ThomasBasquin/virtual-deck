@@ -54,7 +54,28 @@ function Mark-Boot([string]$step) {
 
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
-Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+# Add-Type compile le C# à chaque lancement via csc.exe, ~2 s à froid à
+# l'ouverture de session : la DLL compilée est gardée, nommée d'après le hash
+# du code, et recompilée seulement quand le code change
+function Add-CachedType([string]$name, [string[]]$refs, [string]$code) {
+    $dir = Join-Path $env:LOCALAPPDATA 'virtual-deck'
+    $sha = [Security.Cryptography.SHA256]::Create()
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($refs -join ',') + "`n" + $code)
+    $hash = -join ($sha.ComputeHash($bytes)[0..7] | ForEach-Object { $_.ToString('x2') })
+    $dll = Join-Path $dir "$name-$hash.dll"
+    if (-not (Test-Path $dll)) {
+        [void](New-Item -ItemType Directory -Force $dir)
+        $tmp = "$dll.$PID.tmp"
+        Add-Type -ReferencedAssemblies $refs -TypeDefinition $code -OutputAssembly $tmp -OutputType Library
+        Move-Item $tmp $dll -Force
+        # Versions précédentes ; celle chargée par une instance encore ouverte reste verrouillée
+        Get-ChildItem $dir -Filter "$name-*.dll" | Where-Object { $_.FullName -ne $dll } |
+            ForEach-Object { try { Remove-Item $_.FullName -Force } catch { } }
+    }
+    Add-Type -Path $dll
+}
+
+Add-CachedType 'virtual_deck' @('System.Windows.Forms', 'System.Drawing') @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;

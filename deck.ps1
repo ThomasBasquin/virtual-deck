@@ -41,7 +41,7 @@ $DeckCfg = @{
     FanMax       = 35
 }
 
-Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Core -TypeDefinition @'
+Add-CachedType 'deck' @('System.Windows.Forms', 'System.Drawing', 'System.Core') @'
 using System;
 using System.Collections.Generic;
 using System.Drawing;

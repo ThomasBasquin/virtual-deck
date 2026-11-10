@@ -120,6 +120,8 @@ Le micro n'expose pas son état de mute. Le script écoute son interface HID, qu
    Start-Process powershell -Verb RunAs -WindowStyle Hidden -Wait -ArgumentList '-NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq ''powershell.exe'' -and $_.ProcessId -ne $PID -and $_.CommandLine -like ''*virtual_deck.ps1*'' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }; Start-Sleep 1; schtasks /Run /TN ''Virtual Deck''"'
    ```
 
+Le C# des scripts est compilé une fois puis gardé dans `%LOCALAPPDATA%\virtual-deck` (une DLL par bloc, nommée d'après le hash du code) : une modification du C# déclenche une recompilation au lancement suivant, et le dossier peut être supprimé sans risque.
+
 Les fichiers `.ps1` doivent rester encodés en **UTF-8 avec BOM** (Windows PowerShell 5.1 lit sinon les accents et symboles de l'OSD en ANSI).
 
 ### Sauvegarde des profils
