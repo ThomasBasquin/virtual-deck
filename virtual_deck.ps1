@@ -1153,11 +1153,18 @@ if ((GetProfile).Cur -le -59.95) {
 }
 
 # Ouverture de session (Explorer lancé il y a peu) : on repart sur les
-# enceintes. Une relance du script en cours de session garde le profil actif
+# enceintes au volume par défaut. Une relance du script en cours de session
+# garde le profil et le volume
 $shell = Get-Process explorer -ErrorAction SilentlyContinue | Sort-Object StartTime | Select-Object -First 1
-if ($S.Active -ne 'enceintes' -and $shell -and ((Get-Date) - $shell.StartTime).TotalMinutes -lt 3) {
-    Log "Ouverture de session : $((GetProfile).Label) → Enceintes"
-    Switch-Profile 'enceintes' -Quiet
+if ($shell -and ((Get-Date) - $shell.StartTime).TotalMinutes -lt 3) {
+    if ($S.Active -ne 'enceintes') {
+        Log "Ouverture de session : $((GetProfile).Label) → Enceintes"
+        Switch-Profile 'enceintes' -Quiet
+    } elseif ((GetProfile).Cur -ne (GetProfile).Default) {
+        Log "Ouverture de session : volume $(Fmt (GetProfile).Cur) → $(Fmt (GetProfile).Default) dB"
+        (GetProfile).Cur = (GetProfile).Default
+        Write-Preamp (GetProfile).Cur
+    }
 }
 
 $syncTimer = New-Object System.Windows.Forms.Timer
