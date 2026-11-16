@@ -143,6 +143,76 @@ namespace VirtualDeck {
     // qui appelle Start) ; le script y relit State/Version/Toggles/Connected.
     // PowerShell plante si un autre thread exécute son code : le signal doit
     // donc passer par le SynchronizationContext de WinForms.
+    // Au démarrage ou au réveil, le hub interne du QuadCast (branché sur le hub
+    // de l'écran) rate parfois son énumération : Windows le laisse en
+    // « échec de demande de descripteur » (USB\VID_0000) sans jamais réessayer.
+    // Couper puis rallumer ce seul port équivaut à un débranchement.
+    public static class UsbRepair {
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_ID_List_Size(out int len, string filter, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_ID_List(string filter, char[] buf, int len, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Locate_DevNode(out int dn, string id, int flags);
+        [DllImport("cfgmgr32.dll")]
+        static extern int CM_Get_Parent(out int parent, int dn, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_ID(int dn, char[] buf, int len, int flags);
+        [DllImport("cfgmgr32.dll")]
+        static extern int CM_Get_DevNode_Registry_Property(int dn, int prop, out int type, ref int buf, ref int len, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_Interface_List_Size(out int len, ref Guid g, string devId, int flags);
+        [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+        static extern int CM_Get_Device_Interface_List(ref Guid g, string devId, char[] buf, int len, int flags);
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+        static extern SafeFileHandle CreateFile(string n, uint acc, uint share, IntPtr sa, uint disp, uint flags, IntPtr t);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool DeviceIoControl(SafeFileHandle h, uint code, byte[] inBuf, int inLen, byte[] outBuf, int outLen, out int ret, IntPtr ov);
+
+        static Guid HubGuid = new Guid("f18a0e88-c30c-11d0-8815-00a0c906bed8");
+        const int FilterEnumeratorPresent = 0x1 | 0x100;
+        const int CM_DRP_ADDRESS = 0x1D;
+        const uint IOCTL_USB_HUB_CYCLE_PORT = 0x220444;
+
+        public static string[] FailedDevices() {
+            var res = new System.Collections.Generic.List<string>();
+            int len;
+            if (CM_Get_Device_ID_List_Size(out len, "USB", FilterEnumeratorPresent) != 0 || len < 2) return res.ToArray();
+            var buf = new char[len];
+            if (CM_Get_Device_ID_List("USB", buf, len, FilterEnumeratorPresent) != 0) return res.ToArray();
+            foreach (var id in new string(buf).Split('\0'))
+                if (id.StartsWith(@"USB\VID_0000&PID_", StringComparison.OrdinalIgnoreCase)) res.Add(id);
+            return res.ToArray();
+        }
+
+        // null si réussi, sinon la raison
+        public static string CyclePort(string instanceId) {
+            int dn, parent, port = 0, type, size = 4;
+            if (CM_Locate_DevNode(out dn, instanceId, 0) != 0) return "périphérique introuvable";
+            if (CM_Get_Parent(out parent, dn, 0) != 0) return "hub parent introuvable";
+            if (CM_Get_DevNode_Registry_Property(dn, CM_DRP_ADDRESS, out type, ref port, ref size, 0) != 0 || port == 0)
+                return "numéro de port inconnu";
+            var idBuf = new char[201];
+            if (CM_Get_Device_ID(parent, idBuf, idBuf.Length, 0) != 0) return "identifiant du hub illisible";
+            string hubId = new string(idBuf).TrimEnd('\0');
+
+            int len;
+            if (CM_Get_Device_Interface_List_Size(out len, ref HubGuid, hubId, 0) != 0 || len < 2) return "interface du hub introuvable";
+            var buf = new char[len];
+            if (CM_Get_Device_Interface_List(ref HubGuid, hubId, buf, len, 0) != 0) return "interface du hub illisible";
+            string path = new string(buf).Split('\0')[0];
+
+            using (var h = CreateFile(path, 0x40000000 /* GENERIC_WRITE */, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
+                if (h.IsInvalid) return "ouverture du hub refusée (" + Marshal.GetLastWin32Error() + ")";
+                var p = BitConverter.GetBytes((long)port);   // USB_CYCLE_PORT_PARAMS { ConnectionIndex, StatusReturned }
+                int ret;
+                if (!DeviceIoControl(h, IOCTL_USB_HUB_CYCLE_PORT, p, 8, p, 8, out ret, IntPtr.Zero))
+                    return "relance du port " + port + " refusée (" + Marshal.GetLastWin32Error() + ")";
+            }
+            return null;
+        }
+    }
+
     public class MicWatcher {
         [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
         static extern int CM_Get_Device_Interface_List_Size(out int len, ref Guid g, string devId, int flags);
@@ -163,6 +233,32 @@ namespace VirtualDeck {
         public volatile int CheckedToggles; // valeur de Toggles au début de la vérification
         public volatile bool Connected;
         public volatile string LastError;
+        public volatile int Repairs;          // +1 à chaque relance de port USB
+        public volatile string LastRepair;
+
+        // Relances par périphérique en échec, oubliées dès qu'il disparaît ;
+        // limitées pour ne pas boucler sur un appareil vraiment défectueux
+        readonly System.Collections.Generic.Dictionary<string, int> repairTries = new System.Collections.Generic.Dictionary<string, int>();
+        DateTime lastRepairAt = DateTime.MinValue;
+
+        void RepairFailedUsb() {
+            var failed = UsbRepair.FailedDevices();
+            foreach (var k in new System.Collections.Generic.List<string>(repairTries.Keys))
+                if (Array.IndexOf(failed, k) < 0) repairTries.Remove(k);
+            if ((DateTime.Now - lastRepairAt).TotalSeconds < 10) return;
+            foreach (var id in failed) {
+                int n;
+                repairTries.TryGetValue(id, out n);
+                if (n >= 3) continue;
+                repairTries[id] = n + 1;
+                lastRepairAt = DateTime.Now;
+                string err = UsbRepair.CyclePort(id);
+                LastRepair = id + " (essai " + (n + 1) + ") : " + (err ?? "port relancé");
+                Repairs++;
+                Notify();
+                return;
+            }
+        }
 
         readonly AutoResetEvent wake = new AutoResetEvent(false);
 
@@ -211,6 +307,7 @@ namespace VirtualDeck {
             while (true) {
                 try {
                     string path = FindHidPath();
+                    if (path == null) RepairFailedUsb();
                     if (path != null) {
                         var h = CreateFile(path, 0x80000000 /* GENERIC_READ */, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
                         if (!h.IsInvalid) {
@@ -977,7 +1074,7 @@ function Hide-BlackScreen {
 # ============================================================
 #  MICRO (HyperX QuadCast S)
 # ============================================================
-$S.Mic = @{ Ver = 0; Tog = 0; State = -1; Connected = $null }
+$S.Mic = @{ Ver = 0; Tog = 0; State = -1; Connected = $null; Repairs = 0 }
 
 # État du micro changé : le deck ouvert suit tout de suite (sans attendre son
 # rafraîchissement d'1 s)
@@ -1002,6 +1099,11 @@ function Poll-Mic {
         Log "Micro : QuadCast $(if ($con) { 'détecté' } else { 'débranché' })"
         if (-not $con) { $m.State = -1 }
         Update-MicDisplay
+    }
+
+    if ($micWatcher.Repairs -ne $m.Repairs) {
+        $m.Repairs = $micWatcher.Repairs
+        Log "USB : périphérique en échec $($micWatcher.LastRepair)"
     }
 
     # Appui sur le capteur : on affiche tout de suite l'état inversé,
