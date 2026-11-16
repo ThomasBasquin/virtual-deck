@@ -236,16 +236,16 @@ namespace VirtualDeck {
         public volatile int Repairs;          // +1 à chaque relance de port USB
         public volatile string LastRepair;
 
-        // Relances par périphérique en échec, oubliées dès qu'il disparaît ;
-        // limitées pour ne pas boucler sur un appareil vraiment défectueux
+        // Relances par périphérique en échec, limitées pour ne pas boucler sur un
+        // appareil vraiment défectueux. Remises à zéro seulement quand le micro
+        // revient : après une relance ratée, Windows recrée le même périphérique
+        // en échec, qui ne doit pas repartir avec un compteur neuf.
         readonly System.Collections.Generic.Dictionary<string, int> repairTries = new System.Collections.Generic.Dictionary<string, int>();
         DateTime lastRepairAt = DateTime.MinValue;
 
         void RepairFailedUsb() {
-            var failed = UsbRepair.FailedDevices();
-            foreach (var k in new System.Collections.Generic.List<string>(repairTries.Keys))
-                if (Array.IndexOf(failed, k) < 0) repairTries.Remove(k);
             if ((DateTime.Now - lastRepairAt).TotalSeconds < 10) return;
+            var failed = UsbRepair.FailedDevices();
             foreach (var id in failed) {
                 int n;
                 repairTries.TryGetValue(id, out n);
@@ -312,6 +312,7 @@ namespace VirtualDeck {
                         var h = CreateFile(path, 0x80000000 /* GENERIC_READ */, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
                         if (!h.IsInvalid) {
                             Connected = true;
+                            repairTries.Clear();
                             Notify();
                             wake.Set();
                             try {
